@@ -23,7 +23,7 @@ template<int N> struct named {
 
     constexpr auto operator<=>(named const&) const = default;
 
-    constexpr const char* name() const {
+    constexpr std::string_view name() const {
         return &m_elems[0];
     }
 

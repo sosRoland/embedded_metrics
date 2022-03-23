@@ -7,7 +7,6 @@ find_package(AWSSDK REQUIRED COMPONENTS monitoring)
 
 
 add_library(aws_emf
-        include/json.h
         include/named.h
         include/cw_emf.h)
 

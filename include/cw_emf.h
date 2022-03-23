@@ -5,17 +5,14 @@
 #ifndef BASE_CW_EMF_H
 #define BASE_CW_EMF_H
 
-
-#include <iostream>
 #include <string_view>
 #include <tuple>
 #include <chrono>
-#include <cmath>
+#include <concepts>
 
 #include <aws/monitoring/model/StandardUnit.h>
 
 #include "named.h"
-#include "json.h"
 
 
 template<typename M> concept emf_metric_c = requires (M metric, typename M::type value){
@@ -35,10 +32,38 @@ template<typename D> concept emf_dimension_c = requires(D dimension) {
     { dimension.value() } -> std::same_as<std::string_view>;
 };
 
-template<typename S> concept emf_msg_sink_c = requires(S sink, const nlohmann::json& data) {
-    { sink.sink(data) };
+template<typename S> concept emf_msg_sink_c = requires(S sink) {
+    { sink.open_root_object() };
+    { sink.close_root_object() };
+    { sink.open_object() };
+    { sink.open_object("field") };
+    { sink.open_object(std::string_view("field")) };
+    { sink.close_object() };
+
+    { sink.open_array() };
+    { sink.open_array("field") };
+    { sink.close_array() };
+
+    { sink.write_next_element() };
+
+    { sink.write_value("field", std::string("Hallo World")) };
+    { sink.write_value("field", std::string_view("Value")) };
+    { sink.write_value("field", true) };
+    { sink.write_value("field", false) };
+    { sink.write_value("field", 1) };
+    { sink.write_value("field", 1l) };
+    { sink.write_value("field", 1ll) };
+    { sink.write_value("field", 1.2f) };
+    { sink.write_value("field", 1.2L) };
+
+    { sink.write_value(std::string("Hallo World")) };
+    { sink.write_value("Value") };
+    { sink.write_value(true) };
+    { sink.write_value(1) };
+    { sink.write_value(1.2f) };
 
     { sink.generate() } -> std::same_as<bool>;
+
 };
 
 template<named metric_name, Aws::CloudWatch::Model::StandardUnit unit, typename value_type = double>
@@ -73,7 +98,7 @@ private:
 
 template<emf_metric_c... metrics>
 class emf_metrics {
-
+    static constexpr int block_size{100};
 
 public:
     template<int index> void put_value(auto value) {
@@ -93,7 +118,11 @@ public:
         }, m_metrics);
     }
 
-    constexpr std::size_t max_size() const {
+    static constexpr int size() {
+        return sizeof...(metrics);
+    }
+
+    std::size_t max_array_value_size() const {
         std::size_t max=0;
         auto max_f = [&](auto&& m) {
             max = std::max(max, m.size());
@@ -106,23 +135,36 @@ public:
         return max;
     }
 
+    int num_blocks() const {
+        return max_array_value_size() / block_size;
+    }
 
-    void metrics_header(auto& header) const {
-        header["Metrics"] = nlohmann::json::array();
 
-        std::apply([&](const metrics&... m) -> void {
-            auto header_f = [&](auto&& metric) {
-                header["Metrics"].push_back(nlohmann::json::object({ {"Name", metric.name()} , {"Unit", metric.unit_name()}}));
-            };
 
-            (header_f(m), ...);
-        }, m_metrics);
+    void write_header(emf_msg_sink_c auto& sink) const {
+        if constexpr(size() > 0) {
+            sink.write_next_element();
+
+            sink.open_array("Metrics");
+
+            write_recursive_header(sink);
+
+            sink.close_array();
+        }
+    }
+
+    void write_values(emf_msg_sink_c auto& sink, int block) const {
+        if constexpr(size() > 0) {
+            sink.write_next_element();
+
+            write_recursive_values(sink, block);
+        }
     }
 
     void metrics_values(auto& root, int block) const {
 
         std::apply([&](const metrics&... m) -> void {
-            int upper_bound = ( (block+1)*100 < max_size() ? (block+1)*100 : max_size() );
+            int upper_bound = ( (block+1)*100 < max_array_value_size() ? (block + 1) * 100 : max_array_value_size() );
 
             auto value_f = [&](const auto& metric) {
 
@@ -144,6 +186,56 @@ public:
     }
 private:
     std::tuple<metrics...> m_metrics;
+
+    template<int index=0>
+    void write_recursive_header(emf_msg_sink_c auto& sink) const {
+        sink.open_object();
+
+        const auto& metric = std::get<index>(m_metrics);
+
+        sink.write_value("Name", metric.name());
+        sink.write_next_element();
+        sink.write_value("Unit", metric.unit_name());
+
+        sink.close_object();
+
+        if constexpr(index < sizeof...(metrics) - 1) {
+            sink.write_next_element();
+            write_recursive_header<(index+1)>(sink);
+        }
+    }
+
+    template<int index=0>
+    void write_recursive_values(emf_msg_sink_c auto& sink, int block) const {
+        const auto& metric = std::get<index>(m_metrics);
+
+        if (metric.size() == 1 && block == 0)
+            sink.write_value(metric.name(), metric.value_at(0));
+        else if (metric.size() > 1) {
+            std::size_t start_index = block * block_size;
+
+            if (metric.size() > start_index) {
+                std::size_t end_index = (block+1) * block_size;
+                if (metric.size() < end_index)
+                    end_index = metric.size();
+
+                sink.open_array(metric.name());
+
+                for (int i=start_index; i < end_index; ++i) {
+                    if (i != start_index)
+                        sink.write_next_element();
+                    sink.write_value(metric.value_at(i));
+                }
+
+                sink.close_array();
+            }
+        }
+
+        if constexpr(index < sizeof...(metrics) - 1) {
+            sink.write_next_element();
+            write_recursive_values<(index+1)>(sink, block);
+        }
+    }
 };
 
 
@@ -202,69 +294,214 @@ public:
         }, m_dimensions);
     }
 
-    void dimension_header(auto& header) const {
-        if constexpr(sizeof...(dimensions) > 0) {
-            header["Dimensions"] = nlohmann::json::array();
-            nlohmann::json &dimension_array = header["Dimensions"].emplace_back();
-
-            std::apply([&](const dimensions&... all_dimensions) {
-
-                ([&](auto&& dimension) {
-                    dimension_array.push_back(dimension.name());
-                }(all_dimensions)  , ...);
-
-            }, m_dimensions);
-        }
+    static constexpr int size() {
+        return sizeof...(dimensions);
     }
 
-    void dimension_values(auto & root) const {
-        if constexpr(sizeof...(dimensions) > 0) {
-            std::apply([&](const dimensions&... all_dimensions) {
+    void write_header(emf_msg_sink_c auto& sink) const {
+        sink.write_next_element();
 
-                ([&](auto&& dimension) {
-                    root[dimension.name().data()] = dimension.value();
-                }(all_dimensions)  , ...);
+        sink.open_array("Dimensions");
+        sink.open_array();
+        if constexpr(size() > 0) {
 
-            }, m_dimensions);
+            write_recursive_header(sink);
         }
+
+        sink.close_array();
+        sink.close_array();
+    }
+
+    void write_values(emf_msg_sink_c auto& sink) const {
+        if constexpr(sizeof...(dimensions) > 0) {
+            sink.write_next_element();
+            write_recursive_values(sink);
+        }
+
     }
 
 private:
     std::tuple<dimensions...> m_dimensions;
+
+    template<int index=0> void write_recursive_header(auto& sink) const {
+        sink.write_value(std::get<index>(m_dimensions).name());
+
+        if constexpr(index < sizeof...(dimensions) - 1) {
+            sink.write_next_element();
+            write_recursive_header<(index+1)>(sink);
+        }
+    }
+
+    template<int index=0>
+    void write_recursive_values(auto& sink) const {
+        const auto& dimension = std::get<index>(m_dimensions);
+        sink.write_value(dimension.name(), dimension.value());
+
+        if constexpr(index < sizeof...(dimensions) - 1) {
+            sink.write_next_element();
+            write_recursive_values<(index+1)>(sink);
+        }
+    }
 };
 
 
-class emf_console_sink {
+class emf_string_sink {
 public:
-    void sink(const nlohmann::json& data) const {
-        for (auto metrics_line: data) {
-            std::cout << data.dump() << "\n";
-        }
+    emf_string_sink(std::string& out_buffer): m_buffer{out_buffer} {}
+
+    void open_root_object() {
+        open_object();
     }
+    void close_root_object() {
+        m_buffer += "}\n";
+    }
+
+    void open_object() {
+        m_buffer += '{';
+    }
+    void open_object(std::string_view name) {
+        m_buffer += '"';
+        m_buffer += name.data();
+        m_buffer += "\": {";
+
+    }
+    void close_object() {
+        m_buffer += '}';
+    }
+
+    void open_array() {
+        m_buffer += '[';
+    }
+    void open_array(std::string_view name) {
+        m_buffer += '"';
+        m_buffer += name.data();
+        m_buffer += "\": [";
+    }
+    void close_array() {
+        m_buffer += ']';
+    }
+
+    void write_next_element() {
+        m_buffer += ',';
+    }
+
+    void write_value(std::string_view name, const std::string& value) {
+        m_buffer += '"';
+        m_buffer += name.data();
+        m_buffer += "\":";
+        write_value(value);
+    }
+    void write_value(std::string_view name, std::string_view value) {
+        m_buffer += '"';
+        m_buffer += name.data();
+        m_buffer += "\":";
+        write_value(value);
+    }
+    void write_value(std::string_view name, bool value) {
+        m_buffer += '"';
+        m_buffer += name.data();
+        m_buffer += "\":";
+        write_value(value);
+    }
+    void write_value(std::string_view name, std::integral auto value) {
+        m_buffer += '"';
+        m_buffer += name.data();
+        m_buffer += "\":";
+        write_value(value);
+    }
+    void write_value(std::string_view name, std::floating_point auto value) {
+        m_buffer += '"';
+        m_buffer += name.data();
+        m_buffer += "\":";
+        write_value(value);
+    }
+
+    void write_value(const std::string& value) {
+        m_buffer += '"';
+        m_buffer += value;
+        m_buffer += '"';
+    }
+    void write_value(std::string_view value) {
+        m_buffer += '"';
+        m_buffer += value.data();
+        m_buffer += '"';
+    }
+    void write_value(bool value) {
+        if (value)
+            m_buffer += "true";
+        else
+            m_buffer += "false";
+    }
+    void write_value(std::integral auto value) {
+        m_buffer += std::to_string(value);
+    }
+    void write_value(std::floating_point auto value) {
+        m_buffer += std::to_string(value);
+    }
+
+    void done() {}
 
     constexpr bool generate() const {
         return true;
     }
+
+private:
+    std::string& m_buffer;
+};
+
+class emf_console_sink: public emf_string_sink {
+public:
+    emf_console_sink(): emf_string_sink(m_buffer) {}
+
+    void done() {
+        std::fputs(m_buffer.c_str(), stdout);
+    }
+private:
+    std::string m_buffer;
 };
 
 class emf_null_sink {
 public:
-    void sink(const nlohmann::json&) const {
-        // NO-OP
-    }
+    void open_root_object() const {}
+    void close_root_object() const {}
+    void open_object() const {}
+    void open_object(std::string_view name) const {}
+    void close_object() const {}
+
+    void open_array() const {}
+    void open_array(std::string_view name) const {}
+    void close_array() const {}
+
+    void write_next_element() const {}
+
+    void write_value(std::string_view, const std::string&) const {}
+    void write_value(std::string_view, std::string_view) const {}
+    void write_value(std::string_view, bool) const {}
+    void write_value(std::string_view, std::integral auto) const {}
+    void write_value(std::string_view, std::floating_point auto) const {}
+
+    void write_value(const std::string&) const {}
+    void write_value(std::string_view) const {}
+    void write_value(bool) const {}
+    void write_value(std::integral auto) const {}
+    void write_value(std::floating_point auto) const {}
+
+    void done() {}
 
     constexpr bool generate() const {
         return false;
     }
+
 };
 
-template<named emf_namespace, typename metrics, typename dimensions = emf_dimensions<>,  emf_msg_sink_c sink=emf_console_sink>
+template<named emf_namespace, typename metrics, typename dimensions = emf_dimensions<>,  emf_msg_sink_c sink_t=emf_console_sink>
 class emf_logger {
 
 public:
+    emf_logger(auto&&... args): m_sink(args...) {}
     ~emf_logger() {
         if (m_sink.generate())
-            m_sink.sink(data());
+            write();
     }
 
     template<int index> void put_metrics_value(auto value) {
@@ -283,46 +520,53 @@ public:
         m_dimensions.template value_by_name<name>(value);
     }
 
-    nlohmann::json data() const {
-        nlohmann::json metrics_data = nlohmann::json::array();
 
-        for (int block=0; block <= m_metrics.max_size() / 100; ++block) {
-            auto& msg = metrics_data.template emplace_back(create_msg());
-
-            m_metrics.metrics_header(msg["_aws"]["CloudWatchMetrics"][0]);
-            m_dimensions.dimension_header(msg["_aws"]["CloudWatchMetrics"][0]);
-
-            m_metrics.metrics_values(msg, block);
-            m_dimensions.dimension_values(msg);
-        }
-
-        return metrics_data;
+    void flush() {
+        write();
     }
-
-    std::string str() const {
-        std::string metrics_data;
-
-        for (auto metrics_line: data()) {
-            metrics_data += metrics_line.dump() + "\n";
-        }
-
-        return metrics_data;
-    }
-
 private:
     metrics m_metrics;
     dimensions m_dimensions;
-    sink m_sink;
+    sink_t m_sink;
 
-    nlohmann::json create_msg() const {
-        nlohmann::json data;
-        data["_aws"]["Timestamp"] = std::chrono::duration_cast<std::chrono::milliseconds>(std::chrono::system_clock::now().time_since_epoch()).count();
+    void write() {
 
-        auto& metrics_header = data["_aws"]["CloudWatchMetrics"].emplace_back();
-        metrics_header["Namespace"] = emf_namespace.name();
+        for (int block=0; block <= m_metrics.num_blocks(); ++block) {
+            m_sink.open_root_object();
 
-        return data;
+            // Header
+            m_sink.open_object("_aws");
+            m_sink.write_value("Timestamp", std::chrono::duration_cast<std::chrono::milliseconds>(std::chrono::system_clock::now().time_since_epoch()).count());
+            m_sink.write_next_element();
+
+            // CloudWatchMetrics Header
+            m_sink.open_array("CloudWatchMetrics");
+            m_sink.open_object();
+
+            m_sink.write_value("Namespace", emf_namespace.name());
+            m_dimensions.write_header(m_sink);
+            m_metrics.write_header(m_sink);
+
+            m_sink.close_object();
+            m_sink.close_array();
+            // Close Header
+            m_sink.close_object();
+
+            // Data Section
+            if constexpr(metrics::size() > 0 || dimensions::size() > 0) {
+
+                m_dimensions.write_values(m_sink);
+                m_metrics.write_values(m_sink, block);
+
+            }
+
+            m_sink.close_root_object();
+
+        }
+
+        m_sink.done();
     }
+
 };
 
 
