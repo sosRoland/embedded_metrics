@@ -161,29 +161,6 @@ public:
         }
     }
 
-    void metrics_values(auto& root, int block) const {
-
-        std::apply([&](const metrics&... m) -> void {
-            int upper_bound = ( (block+1)*100 < max_array_value_size() ? (block + 1) * 100 : max_array_value_size() );
-
-            auto value_f = [&](const auto& metric) {
-
-                if (metric.size() > 1) {
-                    for (int index=(block*100); index < upper_bound; ++index) {
-                        if (metric.size() < index)
-                            return;
-
-                        root[metric.name().data()].push_back( metric.value_at(index) );
-                    }
-
-                } else if (block == 0)
-                    root[metric.name().data()] = metric.value_at(0);
-
-            };
-
-            (value_f(m), ...);
-        }, m_metrics);
-    }
 private:
     std::tuple<metrics...> m_metrics;
 
