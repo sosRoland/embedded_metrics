@@ -7,7 +7,6 @@ find_package(AWSSDK REQUIRED COMPONENTS monitoring)
 
 
 add_library(aws_emf
-        include/named.h
         include/cw_emf.h)
 
 target_link_libraries(aws_emf PUBLIC ${AWSSDK_LINK_LIBRARIES})

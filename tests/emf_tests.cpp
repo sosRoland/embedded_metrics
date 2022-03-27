@@ -10,12 +10,12 @@
 TEST_CASE("AWS Embedded Metrics Format", "[main]") {
 
     SECTION("Create Metric") {
-        emf_metric<"test_metric", Aws::CloudWatch::Model::StandardUnit::Count> metric;
+        cw_emf::metric<"test_metric", Aws::CloudWatch::Model::StandardUnit::Count> metric;
 
         REQUIRE(metric.name() == "test_metric");
         REQUIRE(metric.unit_name() == "Count");
 
-        emf_metrics<emf_metric<"test_metric", Aws::CloudWatch::Model::StandardUnit::Count>> metrics;
+        cw_emf::metrics<cw_emf::metric<"test_metric", Aws::CloudWatch::Model::StandardUnit::Count>> metrics;
         metrics.put_value<0>(3.45);
 
         REQUIRE(metrics.max_array_value_size() == 1);
@@ -23,15 +23,15 @@ TEST_CASE("AWS Embedded Metrics Format", "[main]") {
     }
 
     SECTION("Single Value Use Logger") {
-        emf_logger<"test_ns", emf_metrics<emf_metric<"test_metric", Aws::CloudWatch::Model::StandardUnit::Count>>> logger;
+        cw_emf::logger<"test_ns", cw_emf::metrics<cw_emf::metric<"test_metric", Aws::CloudWatch::Model::StandardUnit::Count>>> logger;
         logger.put_metrics_value<0>(34.456783);
     }
 
     SECTION("Multi Metrics Use Logger") {
-        emf_logger<"test_ns",
-                emf_metrics<
-                        emf_metric<"test_metric", Aws::CloudWatch::Model::StandardUnit::Count>,
-                        emf_metric<"other_metric", Aws::CloudWatch::Model::StandardUnit::Bytes_Second, int>>> logger;
+        cw_emf::logger<"test_ns",
+                cw_emf::metrics<
+                        cw_emf::metric<"test_metric", Aws::CloudWatch::Model::StandardUnit::Count>,
+                        cw_emf::metric<"other_metric", Aws::CloudWatch::Model::StandardUnit::Bytes_Second, int>>> logger;
         logger.put_metrics_value<0>(34.456783);
 
         for (int i=0; i < 110; ++i) {
@@ -41,7 +41,7 @@ TEST_CASE("AWS Embedded Metrics Format", "[main]") {
 
 
     SECTION("Use Logger") {
-        emf_logger<"test_ns", emf_metrics<emf_metric<"test_metric", Aws::CloudWatch::Model::StandardUnit::Count, int>>> logger;
+        cw_emf::logger<"test_ns", cw_emf::metrics<cw_emf::metric<"test_metric", Aws::CloudWatch::Model::StandardUnit::Count, int>>> logger;
 
         for (int i=0; i < 110; ++i) {
             logger.put_metrics_value<0>(1+i);
@@ -49,19 +49,19 @@ TEST_CASE("AWS Embedded Metrics Format", "[main]") {
     }
 
     SECTION("Use Dimensions") {
-        emf_logger<"test_ns", emf_metrics<emf_metric<"test_metric", Aws::CloudWatch::Model::StandardUnit::Count>>, emf_dimensions<emf_dimension<"version">>> logger;
+        cw_emf::logger<"test_ns", cw_emf::metrics<cw_emf::metric<"test_metric", Aws::CloudWatch::Model::StandardUnit::Count>>, cw_emf::dimensions<cw_emf::dimension<"version">>> logger;
         logger.put_metrics_value<0>(456.45676);
         logger.dimension_value_by_name<"version">("1.0.0");
     }
 
     SECTION("Use Dimensions with static value") {
         std::string buffer;
-         emf_logger<"test_ns",
-                emf_metrics<
-                        emf_metric<"test_metric", Aws::CloudWatch::Model::StandardUnit::Count>>,
-                emf_dimensions<
-                        emf_dimension<"version">,
-                        emf_static_dimension<"function_name", "my_lambda_fun">>, emf_string_sink> logger(buffer);
+        cw_emf::logger<"test_ns",
+                cw_emf::metrics<
+                        cw_emf::metric<"test_metric", Aws::CloudWatch::Model::StandardUnit::Count>>,
+                cw_emf::dimensions<
+                        cw_emf::dimension<"version">,
+                        cw_emf::dimension_fixed<"function_name", "my_lambda_fun">>, cw_emf::output_sink_string> logger(buffer);
         logger.put_metrics_value<0>(456.45676);
         logger.dimension_value_by_name<"version">("1.0.0");
 
@@ -73,24 +73,24 @@ TEST_CASE("AWS Embedded Metrics Format", "[main]") {
 TEST_CASE("Create Metric Benchmark", "[benchmark]") {
     BENCHMARK("Single metric, no output") {
 
-        emf_logger<"test_ns",
-              emf_metrics<
-                      emf_metric<"test_metric", Aws::CloudWatch::Model::StandardUnit::Count>>,
-              emf_dimensions<
-                      emf_dimension<"version">,
-                      emf_static_dimension<"function_name", "my_lambda_fun">>, emf_null_sink> logger;
+        cw_emf::logger<"test_ns",
+                cw_emf::metrics<
+                        cw_emf::metric<"test_metric", Aws::CloudWatch::Model::StandardUnit::Count>>,
+                cw_emf::dimensions<
+                        cw_emf::dimension<"version">,
+                        cw_emf::dimension_fixed<"function_name", "my_lambda_fun">>, cw_emf::output_sink_null> logger;
 
       logger.put_metrics_value<0>(34);
    };
 
     BENCHMARK("Metric By Name, no output") {
-       emf_logger<"test_ns",
-               emf_metrics<
-                       emf_metric<"test_metric", Aws::CloudWatch::Model::StandardUnit::Count, int>,
-                       emf_metric<"transfer_speed", Aws::CloudWatch::Model::StandardUnit::Bytes_Second>>,
-               emf_dimensions<
-                       emf_dimension<"version">,
-                       emf_static_dimension<"function_name", "my_lambda_fun">>, emf_null_sink> logger;
+       cw_emf::logger<"test_ns",
+               cw_emf::metrics<
+                       cw_emf::metric<"test_metric", Aws::CloudWatch::Model::StandardUnit::Count, int>,
+                       cw_emf::metric<"transfer_speed", Aws::CloudWatch::Model::StandardUnit::Bytes_Second>>,
+               cw_emf::dimensions<
+                       cw_emf::dimension<"version">,
+                       cw_emf::dimension_fixed<"function_name", "my_lambda_fun">>, cw_emf::output_sink_null> logger;
 
 
        logger.metric_value_by_name<"test_metric">(82);
@@ -98,7 +98,7 @@ TEST_CASE("Create Metric Benchmark", "[benchmark]") {
     };
 
     BENCHMARK("150 Metrics, no output") {
-          emf_logger<"test_ns", emf_metrics<emf_metric<"test_metric", Aws::CloudWatch::Model::StandardUnit::Count, int>>, emf_dimensions<>, emf_null_sink> logger;
+        cw_emf::logger<"test_ns", cw_emf::metrics<cw_emf::metric<"test_metric", Aws::CloudWatch::Model::StandardUnit::Count, int>>, cw_emf::dimensions<>, cw_emf::output_sink_null> logger;
 
           for (int i=0; i < 110; ++i) {
               logger.put_metrics_value<0>(i + 1);
@@ -107,12 +107,12 @@ TEST_CASE("Create Metric Benchmark", "[benchmark]") {
 
     BENCHMARK("Single metric") {
         std::string buffer;
-        emf_logger<"test_ns",
-                  emf_metrics<
-                          emf_metric<"test_metric", Aws::CloudWatch::Model::StandardUnit::Count>>,
-                  emf_dimensions<
-                          emf_dimension<"version">,
-                          emf_static_dimension<"function_name", "my_lambda_fun">>, emf_string_sink> logger(buffer);
+        cw_emf::logger<"test_ns",
+                cw_emf::metrics<
+                        cw_emf::metric<"test_metric", Aws::CloudWatch::Model::StandardUnit::Count>>,
+                cw_emf::dimensions<
+                        cw_emf::dimension<"version">,
+                        cw_emf::dimension_fixed<"function_name", "my_lambda_fun">>, cw_emf::output_sink_string> logger(buffer);
 
           logger.put_metrics_value<0>(34);
 
@@ -122,13 +122,13 @@ TEST_CASE("Create Metric Benchmark", "[benchmark]") {
 
     BENCHMARK("Metric By Name") {
         std::string buffer;
-        emf_logger<"test_ns",
-               emf_metrics<
-                       emf_metric<"test_metric", Aws::CloudWatch::Model::StandardUnit::Count, int>,
-                       emf_metric<"transfer_speed", Aws::CloudWatch::Model::StandardUnit::Bytes_Second>>,
-               emf_dimensions<
-                       emf_dimension<"version">,
-                       emf_static_dimension<"function_name", "my_lambda_fun">>, emf_string_sink> logger(buffer);
+        cw_emf::logger<"test_ns",
+                cw_emf::metrics<
+                        cw_emf::metric<"test_metric", Aws::CloudWatch::Model::StandardUnit::Count, int>,
+                        cw_emf::metric<"transfer_speed", Aws::CloudWatch::Model::StandardUnit::Bytes_Second>>,
+                cw_emf::dimensions<
+                        cw_emf::dimension<"version">,
+                        cw_emf::dimension_fixed<"function_name", "my_lambda_fun">>, cw_emf::output_sink_string> logger(buffer);
 
 
        logger.metric_value_by_name<"test_metric">(82);
@@ -141,19 +141,18 @@ TEST_CASE("Create Metric Benchmark", "[benchmark]") {
     BENCHMARK("150 Metrics") {
         std::string buffer;
 
-        emf_logger<"test_ns", emf_metrics<emf_metric<"test_metric", Aws::CloudWatch::Model::StandardUnit::Count, int>>, emf_dimensions<>, emf_string_sink> logger(buffer);
+        cw_emf::logger<"test_ns", cw_emf::metrics<cw_emf::metric<"test_metric", Aws::CloudWatch::Model::StandardUnit::Count, int>>, cw_emf::dimensions<>, cw_emf::output_sink_string> logger(buffer);
 
         for (int i=0; i < 110; ++i) {
             logger.put_metrics_value<0>(i + 1);
         }
 
         logger.flush();
-        std::fputs(buffer.c_str(), stdout);
         return buffer;
     };
 
     BENCHMARK("150 Metrics") {
-         emf_logger<"test_ns", emf_metrics<emf_metric<"test_metric", Aws::CloudWatch::Model::StandardUnit::Count, int>>, emf_dimensions<>, emf_console_sink> logger;
+         cw_emf::logger<"test_ns", cw_emf::metrics<cw_emf::metric<"test_metric", Aws::CloudWatch::Model::StandardUnit::Count, int>>, cw_emf::dimensions<>, cw_emf::output_sink_stdout> logger;
 
          for (int i=0; i < 110; ++i) {
              logger.put_metrics_value<0>(i + 1);
