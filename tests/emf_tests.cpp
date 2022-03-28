@@ -40,13 +40,24 @@ TEST_CASE("AWS Embedded Metrics Format", "[main]") {
     }
 
 
-    SECTION("Use Logger") {
+    SECTION("Logger with more then 150 metrics value") {
         cw_emf::logger<"test_ns", cw_emf::metrics<cw_emf::metric<"test_metric", Aws::CloudWatch::Model::StandardUnit::Count, int>>> logger;
 
         for (int i=0; i < 110; ++i) {
             logger.put_metrics_value<0>(1+i);
         }
     }
+
+    SECTION("Logger with more then 150 metrics value (multiple metrics)") {
+        cw_emf::logger<"test_ns", cw_emf::metrics<cw_emf::metric<"test_metric", Aws::CloudWatch::Model::StandardUnit::Count, int>, cw_emf::metric<"xfer_rate", Aws::CloudWatch::Model::StandardUnit::Bytes_Second>>> logger;
+
+        logger.put_metrics_value<"xfer_rate">(1.23);
+
+        for (int i=0; i < 110; ++i) {
+            logger.put_metrics_value<0>(1+i);
+        }
+    }
+
 
     SECTION("Use Dimensions") {
         cw_emf::logger<"test_ns", cw_emf::metrics<cw_emf::metric<"test_metric", Aws::CloudWatch::Model::StandardUnit::Count>>, cw_emf::dimensions<cw_emf::dimension<"version">>> logger;
@@ -93,8 +104,8 @@ TEST_CASE("Create Metric Benchmark", "[benchmark]") {
                        cw_emf::dimension_fixed<"function_name", "my_lambda_fun">>, cw_emf::output_sink_null> logger;
 
 
-       logger.metric_value_by_name<"test_metric">(82);
-       logger.metric_value_by_name<"transfer_speed">(1047.456);
+       logger.put_metrics_value<"test_metric">(82);
+       logger.put_metrics_value<"transfer_speed">(1047.456);
     };
 
     BENCHMARK("150 Metrics, no output") {
@@ -134,8 +145,8 @@ TEST_CASE("Create Metric Benchmark", "[benchmark]") {
 
         logger.dimension_value_by_name<"version">("1.0.0");
 
-        logger.metric_value_by_name<"test_metric">(82);
-        logger.metric_value_by_name<"transfer_speed">(1047.456);
+        logger.put_metrics_value<"test_metric">(82);
+        logger.put_metrics_value<"transfer_speed">(1047.456);
 
         logger.flush();
         return buffer;

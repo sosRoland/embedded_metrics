@@ -455,6 +455,7 @@ namespace cw_emf {
 
         void done() {
             std::fputs(m_buffer.c_str(), stdout);
+            std::fflush(stdout);
         }
     private:
         std::string m_buffer;
@@ -508,7 +509,7 @@ namespace cw_emf {
             m_metrics.template put_value<index>(value);
         }
 
-        template<internal::named name> void metric_value_by_name(auto value) {
+        template<internal::named name> void put_metrics_value(auto value) {
             m_metrics.template put_value_by_name<name>(value);
         }
 
