@@ -178,8 +178,6 @@ namespace cw_emf {
 
         void write_values(internal::emf_msg_sink_c auto& sink, int block) const {
             if constexpr(size() > 0) {
-                sink.write_next_element();
-
                 write_recursive_values(sink, block);
             }
         }
@@ -209,9 +207,10 @@ namespace cw_emf {
         void write_recursive_values(internal::emf_msg_sink_c auto& sink, int block) const {
             const auto& metric = std::get<index>(m_metrics);
 
-            if (metric.size() == 1 && block == 0)
+            if (metric.size() == 1 && block == 0) {
+                sink.write_next_element();
                 sink.write_value(metric.name(), metric.value_at(0));
-            else if (metric.size() > 1) {
+            } else if (metric.size() > 1) {
                 std::size_t start_index = block * block_size;
 
                 if (metric.size() > start_index) {
@@ -219,6 +218,7 @@ namespace cw_emf {
                     if (metric.size() < end_index)
                         end_index = metric.size();
 
+                    sink.write_next_element();
                     sink.open_array(metric.name());
 
                     for (int i=start_index; i < end_index; ++i) {
@@ -232,7 +232,6 @@ namespace cw_emf {
             }
 
             if constexpr(index < sizeof...(metrics_t) - 1) {
-                sink.write_next_element();
                 write_recursive_values<(index+1)>(sink, block);
             }
         }
