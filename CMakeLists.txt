@@ -15,6 +15,7 @@ set_target_properties(aws_emf PROPERTIES LINKER_LANGUAGE CXX)
 
 add_executable(${PROJECT_NAME}_test
         tests/catch2.h
+        tests/json.h
         tests/bootstrap.cpp
         tests/emf_tests.cpp)
 

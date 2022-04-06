@@ -1,92 +1,274 @@
 #define CATCH_CONFIG_ENABLE_BENCHMARKING
 
 #include <iostream>
+#include <sstream>
+#include <vector>
 
 #include "catch2.h"
+#include "json.h"
 
 #include <cw_emf.h>
 
 
+std::vector<nlohmann::json> split_string_by_newline(const std::string& str)
+{
+    auto result = std::vector<nlohmann::json>{};
+    auto ss = std::stringstream{str};
+
+    for (std::string line; std::getline(ss, line, '\n');)
+        result.push_back(nlohmann::json::parse(line));
+
+    return result;
+}
+
+
 TEST_CASE("AWS Embedded Metrics Format", "[main]") {
 
-    SECTION("Create Metric") {
-        cw_emf::metric<"test_metric", Aws::CloudWatch::Model::StandardUnit::Count> metric;
-
-        REQUIRE(metric.name() == "test_metric");
-        REQUIRE(metric.unit_name() == "Count");
-
-        cw_emf::metrics<cw_emf::metric<"test_metric", Aws::CloudWatch::Model::StandardUnit::Count>> metrics;
-        metrics.put_value<0>(3.45);
-
-        REQUIRE(metrics.max_array_value_size() == 1);
-
-    }
-
-    SECTION("Single Value Use Logger") {
-        cw_emf::logger<"test_ns", cw_emf::metrics<cw_emf::metric<"test_metric", Aws::CloudWatch::Model::StandardUnit::Count>>> logger;
-        logger.put_metrics_value<0>(34.456783);
-    }
-
-    SECTION("Multi Metrics Use Logger") {
-        cw_emf::logger<"test_ns",
-                cw_emf::metrics<
-                        cw_emf::metric<"test_metric", Aws::CloudWatch::Model::StandardUnit::Count>,
-                        cw_emf::metric<"other_metric", Aws::CloudWatch::Model::StandardUnit::Bytes_Second, int>>> logger;
-        logger.put_metrics_value<0>(34.456783);
-
-        for (int i=0; i < 110; ++i) {
-            logger.put_metrics_value<1>(1+i);
-        }
-    }
-
-
-    SECTION("Logger with more then 150 metrics value") {
-        cw_emf::logger<"test_ns", cw_emf::metrics<cw_emf::metric<"test_metric", Aws::CloudWatch::Model::StandardUnit::Count, int>>> logger;
-
-        for (int i=0; i < 110; ++i) {
-            logger.put_metrics_value<0>(1+i);
-        }
-    }
-
-    SECTION("Logger with more then 150 metrics value (multiple metrics)") {
-        cw_emf::logger<"test_ns",
-                cw_emf::metrics<cw_emf::metric<"test_metric", Aws::CloudWatch::Model::StandardUnit::Count, int>,
-                        cw_emf::metric<"xfer_rate", Aws::CloudWatch::Model::StandardUnit::Bytes_Second>>> logger;
-
-        logger.put_metrics_value<"xfer_rate">(1.23);
-
-        for (int i=0; i < 110; ++i) {
-            logger.put_metrics_value<0>(1+i);
-        }
-    }
-
-
-    SECTION("Use Dimensions") {
-        cw_emf::logger<"test_ns", cw_emf::metrics<cw_emf::metric<"test_metric", Aws::CloudWatch::Model::StandardUnit::Count>>, cw_emf::dimensions<cw_emf::dimension<"version">>> logger;
-        logger.put_metrics_value<0>(456.45676);
-        logger.dimension_value<"version">("1.0.0");
-    }
-
-    SECTION("Use Dimensions with static value") {
+    SECTION("Empty Logger") {
+        using namespace  std::literals::chrono_literals;
         std::string buffer;
-        cw_emf::logger<"test_ns",
-                cw_emf::metrics<
-                        cw_emf::metric<"test_metric", Aws::CloudWatch::Model::StandardUnit::Count>>,
-                cw_emf::dimensions<
-                        cw_emf::dimension<"version">,
-                        cw_emf::dimension_fixed<"function_name", "my_lambda_fun">>,
-                cw_emf::log_messages<cw_emf::log_message<"tracing">>,
-                cw_emf::output_sink_string> logger(buffer);
+        {
+            cw_emf::logger<"test_ns", cw_emf::metrics<>, cw_emf::dimensions<>, cw_emf::log_messages<>, cw_emf::output_sink_string> logger(buffer);
+        }
 
-        logger.put_metrics_value<0>(456.45676);
-        logger.dimension_value<"version">("1.0.0");
+        auto test_data = split_string_by_newline(buffer);
+        REQUIRE(test_data.size() == 1);
 
+        auto& emf_message = test_data.at(0);
 
-        logger.log_value<"tracing">("Hallo World");
+        REQUIRE(emf_message.is_object());
 
-        logger.flush();
-        std::cout << "Buffer Value? " << buffer << std::endl;
+        REQUIRE(emf_message.contains("_aws"));
+        REQUIRE(emf_message["_aws"].is_object());
+
+        REQUIRE(emf_message["_aws"].contains("Timestamp"));
+        REQUIRE(emf_message["_aws"]["Timestamp"].is_number_integer());
+        REQUIRE( (std::chrono::duration_cast<std::chrono::milliseconds>(std::chrono::system_clock::now().time_since_epoch() - 1s)).count() <  emf_message["_aws"]["Timestamp"]);
+        REQUIRE(std::chrono::duration_cast<std::chrono::milliseconds>(std::chrono::system_clock::now().time_since_epoch()).count() >= emf_message["_aws"]["Timestamp"]);
+
+        REQUIRE(emf_message["_aws"].contains("CloudWatchMetrics"));
+        REQUIRE(emf_message["_aws"]["CloudWatchMetrics"].is_array());
+        REQUIRE(emf_message["_aws"]["CloudWatchMetrics"].size() == 1);
+        REQUIRE(emf_message["_aws"]["CloudWatchMetrics"][0].is_object());
+
+        REQUIRE(emf_message["_aws"]["CloudWatchMetrics"][0].contains("Namespace"));
+        REQUIRE(emf_message["_aws"]["CloudWatchMetrics"][0]["Namespace"].is_string());
+        REQUIRE(emf_message["_aws"]["CloudWatchMetrics"][0]["Namespace"] == "test_ns");
+
+        REQUIRE(emf_message["_aws"]["CloudWatchMetrics"][0].contains("Dimensions"));
+        REQUIRE(emf_message["_aws"]["CloudWatchMetrics"][0]["Dimensions"].is_array());
+        REQUIRE(emf_message["_aws"]["CloudWatchMetrics"][0]["Dimensions"].size() == 1);
+        REQUIRE(emf_message["_aws"]["CloudWatchMetrics"][0]["Dimensions"][0].is_array());
+        REQUIRE(emf_message["_aws"]["CloudWatchMetrics"][0]["Dimensions"][0].size() == 0);
     }
+
+    SECTION("Single Metric Logger") {
+        std::string buffer;
+        {
+            cw_emf::logger<"test_ns",
+                    cw_emf::metrics<
+                            cw_emf::metric<"metric_1", Aws::CloudWatch::Model::StandardUnit::Count>>,
+                    cw_emf::dimensions<>,
+                    cw_emf::log_messages<>,
+                    cw_emf::output_sink_string> logger(buffer);
+
+            logger.put_metrics_value<"metric_1">(42);
+        }
+
+        auto test_data = split_string_by_newline(buffer);
+        REQUIRE(test_data.size() == 1);
+
+        auto& emf_message = test_data.at(0);
+
+        REQUIRE(emf_message["_aws"]["CloudWatchMetrics"][0].contains("Metrics"));
+        REQUIRE(emf_message["_aws"]["CloudWatchMetrics"][0]["Metrics"].is_array());
+        REQUIRE(emf_message["_aws"]["CloudWatchMetrics"][0]["Metrics"].size() == 1);
+        REQUIRE(emf_message["_aws"]["CloudWatchMetrics"][0]["Metrics"][0].is_object());
+
+        auto& metric_header = emf_message["_aws"]["CloudWatchMetrics"][0]["Metrics"][0];
+
+        REQUIRE(metric_header.contains("Name"));
+        REQUIRE(metric_header.contains("Unit"));
+
+        REQUIRE(metric_header["Name"] == "metric_1");
+        REQUIRE(metric_header["Unit"] == "Count");
+
+        REQUIRE(emf_message.contains("metric_1"));
+        REQUIRE(emf_message["metric_1"].is_number());
+
+        REQUIRE(42 == emf_message["metric_1"]);
+    }
+
+    SECTION("Multiple Metric Logger") {
+        std::string buffer;
+        {
+            cw_emf::logger<"test_ns",
+                    cw_emf::metrics<
+                            cw_emf::metric<"metric_1", Aws::CloudWatch::Model::StandardUnit::Count>,
+                            cw_emf::metric<"metric_2", Aws::CloudWatch::Model::StandardUnit::Count>>,
+                    cw_emf::dimensions<>,
+                    cw_emf::log_messages<>,
+                    cw_emf::output_sink_string> logger(buffer);
+
+            logger.put_metrics_value<"metric_1">(42);
+            logger.put_metrics_value<"metric_2">(3.1415);
+        }
+
+        auto test_data = split_string_by_newline(buffer);
+        REQUIRE(test_data.size() == 1);
+
+        auto &emf_message = test_data.at(0);
+
+        REQUIRE(emf_message["_aws"]["CloudWatchMetrics"][0]["Metrics"].size() == 2);
+
+        for (auto& metric_header: emf_message["_aws"]["CloudWatchMetrics"][0]["Metrics"]) {
+            REQUIRE(emf_message.contains(metric_header["Name"]));
+
+            if (metric_header["Name"] == "metric_1")
+                REQUIRE(42 == emf_message["metric_1"]);
+            else if (metric_header["Name"] == "metric_2")
+                REQUIRE(3.1415 == emf_message["metric_2"]);
+            else
+                REQUIRE(false);
+        }
+    }
+
+    SECTION("Dimensions Logger") {
+        using namespace std::literals::chrono_literals;
+        std::string buffer;
+        {
+            cw_emf::logger<"test_ns",
+                    cw_emf::metrics<>,
+                    cw_emf::dimensions<
+                        cw_emf::dimension_fixed<"version", "$LATEST">,
+                        cw_emf::dimension<"request_id">>,
+                    cw_emf::log_messages<>,
+                    cw_emf::output_sink_string> logger(buffer);
+
+            logger.dimension_value<"request_id">("req_abs_123");
+        }
+
+        auto test_data = split_string_by_newline(buffer);
+        REQUIRE(test_data.size() == 1);
+
+        auto &emf_message = test_data.at(0);
+
+        REQUIRE(emf_message["_aws"]["CloudWatchMetrics"][0]["Dimensions"][0].size() == 2);
+
+        for(auto& dimension: emf_message["_aws"]["CloudWatchMetrics"][0]["Dimensions"][0]) {
+            if (dimension == "version") {
+                REQUIRE(emf_message.contains("version"));
+                REQUIRE(emf_message["version"] == "$LATEST");
+            } else if (dimension == "request_id") {
+                REQUIRE(emf_message.contains("request_id"));
+                REQUIRE(emf_message["request_id"] == "req_abs_123");
+            } else
+                REQUIRE(false);
+        }
+    }
+
+    SECTION("Log Message Logger") {
+        using namespace std::literals::chrono_literals;
+        std::string buffer;
+        {
+            cw_emf::logger<"test_ns",
+                    cw_emf::metrics<>,
+                    cw_emf::dimensions<>,
+                    cw_emf::log_messages<
+                        cw_emf::log_message<"tracing">>,
+                    cw_emf::output_sink_string> logger(buffer);
+
+            logger.log_value<"tracing">("Hallo World");
+        }
+
+        auto test_data = split_string_by_newline(buffer);
+        REQUIRE(test_data.size() == 1);
+
+        auto &emf_message = test_data.at(0);
+
+        REQUIRE(emf_message.contains("tracing"));
+        REQUIRE(emf_message["tracing"].is_string());
+        REQUIRE(emf_message["tracing"] == "Hallo World");
+    }
+
+    SECTION("Metrics with more than 100 values") {
+        using namespace std::literals::chrono_literals;
+        std::string buffer;
+        {
+            cw_emf::logger<"test_ns",
+                    cw_emf::metrics<
+                        cw_emf::metric<"metric_1", Aws::CloudWatch::Model::StandardUnit::Count>>,
+                    cw_emf::dimensions<>,
+                    cw_emf::log_messages<>,
+                    cw_emf::output_sink_string> logger(buffer);
+
+            for (int i=0; i < 150; ++i) {
+                logger.put_metrics_value<0>(i);
+            }
+        }
+
+        auto test_data = split_string_by_newline(buffer);
+        REQUIRE(test_data.size() == 2);
+
+        std::size_t total_values{0};
+        for (auto &emf_message: test_data) {
+            REQUIRE(emf_message.contains("metric_1"));
+            REQUIRE(emf_message["metric_1"].is_array());
+
+            REQUIRE(emf_message["metric_1"].size() <= 100);
+
+            total_values += emf_message["metric_1"].size();
+        }
+
+        REQUIRE(total_values == 150);
+    }
+
+    SECTION("Metrics with more than 100 values and single value metric") {
+        using namespace std::literals::chrono_literals;
+        std::string buffer;
+        {
+            cw_emf::logger<"test_ns",
+                    cw_emf::metrics<
+                            cw_emf::metric<"metric_1", Aws::CloudWatch::Model::StandardUnit::Count>,
+                            cw_emf::metric<"metric_2", Aws::CloudWatch::Model::StandardUnit::Count>>,
+                    cw_emf::dimensions<>,
+                    cw_emf::log_messages<>,
+                    cw_emf::output_sink_string> logger(buffer);
+
+            for (int i=0; i < 150; ++i) {
+                logger.put_metrics_value<"metric_1">(i);
+            }
+
+            logger.put_metrics_value<"metric_2">(42);
+        }
+
+        auto test_data = split_string_by_newline(buffer);
+        REQUIRE(test_data.size() == 2);
+
+        std::size_t total_values{0};
+        for (auto &emf_message: test_data) {
+
+            for (auto& metric_header: emf_message["_aws"]["CloudWatchMetrics"][0]["Metrics"]) {
+                REQUIRE(emf_message.contains(metric_header["Name"]));
+
+                if (metric_header["Name"] == "metric_1") {
+                    REQUIRE(emf_message["metric_1"].is_array());
+                    REQUIRE(emf_message["metric_1"].size() <= 100);
+
+                    total_values += emf_message["metric_1"].size();
+                } else if (metric_header["Name"] == "metric_2") {
+                    REQUIRE(emf_message.contains("metric_2"));
+                    REQUIRE(42 == emf_message["metric_2"]);
+                } else
+                    REQUIRE(false);
+            }
+        }
+
+        REQUIRE(total_values == 150);
+    }
+
+
+    //        std::cout << emf_message.dump(3) << "\n";
 }
 
 TEST_CASE("Create Metric Benchmark", "[benchmark]") {
@@ -127,7 +309,7 @@ TEST_CASE("Create Metric Benchmark", "[benchmark]") {
                 cw_emf::log_messages<>,
                 cw_emf::output_sink_null> logger;
 
-          for (int i=0; i < 110; ++i) {
+          for (int i=0; i < 150; ++i) {
               logger.put_metrics_value<0>(i + 1);
           }
       };
@@ -181,7 +363,7 @@ TEST_CASE("Create Metric Benchmark", "[benchmark]") {
                 cw_emf::log_messages<>,
                 cw_emf::output_sink_string> logger(buffer);
 
-        for (int i=0; i < 110; ++i) {
+        for (int i=0; i < 150; ++i) {
             logger.put_metrics_value<0>(i + 1);
         }
 

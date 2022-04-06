@@ -176,13 +176,13 @@ namespace cw_emf {
 
 
 
-        void write_header(internal::emf_msg_sink_c auto& sink) const {
+        void write_header(internal::emf_msg_sink_c auto& sink, int block) const {
             if constexpr(size() > 0) {
                 sink.write_next_element();
 
                 sink.open_array("Metrics");
 
-                write_recursive_header(sink);
+                write_recursive_header(sink, block);
 
                 sink.close_array();
             }
@@ -198,20 +198,39 @@ namespace cw_emf {
         std::tuple<metrics_t...> m_metrics;
 
         template<int index=0>
-        void write_recursive_header(internal::emf_msg_sink_c auto& sink) const {
-            sink.open_object();
-
+        void write_recursive_header(internal::emf_msg_sink_c auto& sink, int block) const {
             const auto& metric = std::get<index>(m_metrics);
 
-            sink.write_value("Name", metric.name());
-            sink.write_next_element();
-            sink.write_value("Unit", metric.unit_name());
+            if (metric.size() == 1 && block == 0) {
+                if (index != 0)
+                    sink.write_next_element();
 
-            sink.close_object();
+                sink.open_object();
+
+                sink.write_value("Name", metric.name());
+                sink.write_next_element();
+                sink.write_value("Unit", metric.unit_name());
+
+                sink.close_object();
+            } else if (metric.size() > 1) {
+                std::size_t start_index = block * block_size;
+
+                if (metric.size() > start_index) {
+                    if (index != 0)
+                        sink.write_next_element();
+
+                    sink.open_object();
+
+                    sink.write_value("Name", metric.name());
+                    sink.write_next_element();
+                    sink.write_value("Unit", metric.unit_name());
+
+                    sink.close_object();
+                }
+            }
 
             if constexpr(index < sizeof...(metrics_t) - 1) {
-                sink.write_next_element();
-                write_recursive_header<(index+1)>(sink);
+                write_recursive_header<(index+1)>(sink, block);
             }
         }
 
@@ -652,7 +671,7 @@ namespace cw_emf {
 
                 m_sink.write_value("Namespace", emf_namespace.name());
                 m_dimensions.write_header(m_sink);
-                m_metrics.write_header(m_sink);
+                m_metrics.write_header(m_sink, block);
 
                 m_sink.close_object();
                 m_sink.close_array();
