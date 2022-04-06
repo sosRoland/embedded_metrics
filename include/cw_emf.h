@@ -53,6 +53,13 @@ namespace cw_emf {
             { dimension.value() } -> std::same_as<std::string_view>;
         };
 
+        template<typename D> concept emf_log_message_c = requires(D msg) {
+
+            { msg.name() } -> std::same_as<std::string_view>;
+
+            { msg.value() } -> std::same_as<std::string_view>;
+        };
+
         template<typename S> concept emf_msg_sink_c = requires(S sink) {
             { sink.open_root_object() };
             { sink.close_root_object() };
@@ -88,6 +95,11 @@ namespace cw_emf {
         };
 
     }
+
+
+    /************************************************
+     * Metrics Classes
+     */
 
     template<internal::named metric_name, Aws::CloudWatch::Model::StandardUnit unit, typename value_type = double>
     class metric {
@@ -238,6 +250,10 @@ namespace cw_emf {
     };
 
 
+    /************************************************
+     * Dimension Classes
+     */
+
     template<internal::named dimension_name>
     class dimension {
     public:
@@ -343,6 +359,80 @@ namespace cw_emf {
         }
     };
 
+
+    /************************************************
+     * Log Message Classes
+     */
+    template<internal::named message_name>
+    class log_message {
+    public:
+
+        std::string_view name() const {
+            return message_name.name();
+        }
+
+        void value(const std::string& value) {
+            m_value = value;
+        }
+
+        std::string_view value() const {
+            return m_value;
+        }
+
+    private:
+        std::string m_value;
+    };
+
+    template<internal::emf_log_message_c... log_t>
+    class log_messages {
+    public:
+        template<int index> void value(const std::string& value) {
+            std::get<index>(m_logs).value(value);
+        }
+
+        template<internal::named name> void value_by_name(const std::string& value) {
+            std::apply([&](log_t&... all_logs) {
+
+                auto value_f = [&](auto&& log) -> void {
+                    if (log.name() == name.name())
+                        log.value(value);
+                };
+                (value_f(all_logs), ...);
+            }, m_logs);
+        }
+
+        static constexpr int size() {
+            return sizeof...(log_t);
+        }
+
+        void write_values(internal::emf_msg_sink_c auto& sink) const {
+            if constexpr(sizeof...(log_t) > 0) {
+                sink.write_next_element();
+                write_recursive_values(sink);
+            }
+
+        }
+
+    private:
+        std::tuple<log_t...> m_logs;
+
+        template<int index=0>
+        void write_recursive_values(auto& sink) const {
+            const auto& log = std::get<index>(m_logs);
+            sink.write_value(log.name(), log.value());
+
+            if constexpr(index < sizeof...(log_t) - 1) {
+                sink.write_next_element();
+                write_recursive_values<(index+1)>(sink);
+            }
+        }
+
+    };
+
+
+    /************************************************
+     * Sink Classes
+     */
 
     class output_sink_string {
     public:
@@ -494,7 +584,16 @@ namespace cw_emf {
 
     };
 
-    template<internal::named emf_namespace, typename metrics, typename dimensions = dimensions<>,  internal::emf_msg_sink_c sink_t=output_sink_stdout>
+
+    /************************************************
+     * Logger Class
+     */
+
+    template<internal::named emf_namespace,
+            typename metrics,
+            typename dimensions = dimensions<>,
+            typename logs = log_messages<>,
+            internal::emf_msg_sink_c sink_t=output_sink_stdout>
     class logger {
 
     public:
@@ -507,19 +606,26 @@ namespace cw_emf {
         template<int index> void put_metrics_value(auto value) {
             m_metrics.template put_value<index>(value);
         }
-
         template<internal::named name> void put_metrics_value(auto value) {
             m_metrics.template put_value_by_name<name>(value);
         }
 
+
         template<int index> void dimension_value(const std::string& value) {
             m_dimensions.template value<index>(value);
         }
-
-        template<internal::named name> void dimension_value_by_name(const std::string& value) {
+        template<internal::named name> void dimension_value(const std::string& value) {
             m_dimensions.template value_by_name<name>(value);
         }
 
+
+        template<int index> void log_value(const std::string& value) {
+            m_logs.template value<index>(value);
+        }
+
+        template<internal::named name> void log_value(const std::string& value) {
+            m_logs.template value_by_name<name>(value);
+        }
 
         void flush() {
             write();
@@ -527,6 +633,7 @@ namespace cw_emf {
     private:
         metrics m_metrics;
         dimensions m_dimensions;
+        logs m_logs;
         sink_t m_sink;
 
         void write() {
@@ -558,6 +665,10 @@ namespace cw_emf {
                     m_dimensions.write_values(m_sink);
                     m_metrics.write_values(m_sink, block);
 
+                }
+
+                if constexpr(logs::size() > 0) {
+                    m_logs.write_values(m_sink);
                 }
 
                 m_sink.close_root_object();
