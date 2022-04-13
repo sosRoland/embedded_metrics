@@ -76,7 +76,7 @@ template<internal::named dimension_name, internal::named dimension_value>
     class dimension_fixed;
 ```
 
-The plain *dimension* class requires a value to be set using one of the *dimension_value* methods of the logger class, while the *dimension_fixed* class has a fixed compile time value.
+The plain `dimension` class requires a value to be set using one of the `dimension_value` methods of the logger class, while the `dimension_fixed` class has a fixed compile time value.
 
 ## Performance
 
