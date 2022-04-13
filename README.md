@@ -83,6 +83,7 @@ The plain `dimension` class requires a value to be set using one of the `dimensi
 The following benchmarks were produced on a Intel i7-8550U running at 1.8GHz:
 
 ```
+benchmark name                       samples       iterations    estimated
                                      mean          low mean      high mean
                                      std dev       low std dev   high std dev
 -------------------------------------------------------------------------------
