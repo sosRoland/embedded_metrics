@@ -49,13 +49,13 @@ Each of the 3 value types (Metrics, Dimensions and Log Messages) come in 2 diffe
 
 ```c++
 template<int index> void put_metrics_value(auto value);
-template<internal::named name> void put_metrics_value(auto value)
+template<internal::named name> void put_metrics_value(auto value);
 
-template<int index> void dimension_value(const std::string& value)
-template<internal::named name> void dimension_value(const std::string& value)
+template<int index> void dimension_value(const std::string& value);
+template<internal::named name> void dimension_value(const std::string& value);
 
-template<int index> void log_value(const std::string& value)
-template<internal::named name> void log_value(const std::string& value)
+template<int index> void log_value(const std::string& value);
+template<internal::named name> void log_value(const std::string& value);
 ```
 
 ## Metrics
