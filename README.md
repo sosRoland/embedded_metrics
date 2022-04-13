@@ -82,6 +82,7 @@ The plain *dimension* class requires a value to be set using one of the *dimensi
 
 The following benchmarks were produced on a Intel i7-8550U running at 1.8GHz:
 
+```
                                      mean          low mean      high mean
                                      std dev       low std dev   high std dev
 -------------------------------------------------------------------------------
@@ -108,7 +109,7 @@ Multiple Metric By Name                        100            11     2.4706 ms
 150 Metrics                                    100             4     2.4604 ms 
                                         6.00233 us    5.78149 us    6.42213 us 
                                         1.50656 us    905.425 ns    2.33404 us 
-
+```
 
 The *no output* benchmarks use a null message sink that effectivly does nothing, while the others use a string message sink.
 
